@@ -1,0 +1,59 @@
+name: Deploy
+
+on: 
+  push:
+    branches:
+      - main
+      
+jobs: 
+  build_docker_image:
+    name: build_docker_image
+    runs-on: ubuntu-latest 
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+    
+    - name: Make envfile
+      uses: SpicyPizza/create-envfile@v1.3
+      with: 
+        envkey_NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.VITE_APP_SUPABASE_ANON_KEY }}
+        envkey_NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.VITE_APP_SUPABASE_URL }}
+        envkey_SERVICE_ROLE_KEY: ${{ secrets.SERVICE_ROLE_KEY }}
+        envkey_SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+        directory: .
+        file_name: .env
+        fail_on_empty: false
+    - name: Install doctl
+      uses: digitalocean/action-doctl@v2
+      with:
+        token: ${{ secrets.DIGITAL_OCEAN_TOKEN }}
+    - name: Get Git Commit Hash
+      id: git-commit-hash
+      run: echo "::set-output name=hash::$(git rev-parse --short HEAD)"
+    - name: Build Docker Image
+      run: docker build -t app-domain-test/ledgerlite:latest .
+    - name: Log in to DO Container REgister
+      run: doctl registry login --expiry-seconds 1200
+    - name: Tag Docker Image
+      run: docker tag app-domain-test/ledgerlite:latest \registry.digitalocean.com/app-domain-test/ledgerlite:latest
+    - name: Push image to DO Registry
+      run: docker push registry.digitalocean.com/app-domain-test/ledgerlite:latest
+    
+    - name: Log in to DigitalOcean Droplet
+      uses: fifsky/ssh-action@master
+      with: 
+        command: |
+          echo "Logged in"
+          docker ps
+          cd ../home/supabase/supabase/docker
+          docker stop front_end
+          docker rm front_end
+          docker pull registry.digitalocean.com/app-domain-test/ledgerlite:latest
+          docker-compose up -d --no-deps frontend
+        host: ${{secrets.SSH_HOST}}
+        key: ${{secrets.SSH_KEY}}
+        user: ${{ secrets.SSH_USERNAME }}
+        args: "-tt -vvv"
+
+  
